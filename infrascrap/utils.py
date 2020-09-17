@@ -1,10 +1,12 @@
 import re
 import os
 import keyring
+import subprocess
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from contextlib import contextmanager
 from .exceptions import MissingBitWardenToken, BrowserException
+from pyvirtualdisplay import Display
 
 class BaseScrap:
 
@@ -20,11 +22,26 @@ class BaseScrap:
     def pw(self):
         return self._bw_password
 
-    def _bw_password(self):
+
+    def _bw_cmd_get_pw(self):
+        return ['bw', 'get', 'password']
+
+    def _bw_cmd_get_pw_with_session(self):
+        returned = self._bw_cmd_get_pw()
+
         if os.environ.get('BW_SESSION') is None:
             raise MissingBitWardenToken('You did not login to bitwarden - Expecting BW_SESSION env var..')
-        return keyring.get_password(self.bw_service,
-                                    self.username)
+
+        returned.append('--session')
+        returned.append(os.environ.get('BW_SESSION'))
+        returned.append(self.bw_service)
+        return returned
+
+    def _bw_password(self):
+        print(f'Running BW command: {self._bw_cmd_get_pw_with_session()}')
+        return subprocess.check_output(self._bw_cmd_get_pw_with_session())
+        # return keyring.get_password(self.bw_service,
+        #                             self.username)
 
     def set_attrs_by_cfg_params(self, cfg):
         ''' config may contain keys like _param_<param name>
@@ -42,11 +59,26 @@ def BrowserGCM(headless=True):
         chrome_options = Options()
         if _headless:
             chrome_options.add_argument("--headless")
-        return webdriver.Chrome(options=chrome_options)
+            chrome_options.add_argument("--no-sandbox")
+
+        try:
+            display = Display(visible=0, size=(800, 600))
+            display.start()
+        except Exception as e:
+            print(f'Failed loading virtual display {e}')
+            raise BrowserException(f'Failed loading virtual display {e}')
+        try:
+            return webdriver.Chrome(options=chrome_options)
+        except Exception as e:
+            print(f'Webdrivewr.chrome failed {e}')
+            raise BrowserException(f'Webdrivewr.chrome failed {e}')
     try:
-        _browser = init_browser(headless)
-        yield _browser
-    except Exception as exc:
-        raise BrowserException(exc)
+        browser_cm = init_browser(headless)
+        yield browser_cm
+    except BrowserException as exc:
+        # print(f'Failed init browser ?? {exc}')
+        # raise BrowserException(f'Failed init browser ?? {exc}')
+        raise
     finally:
-        _browser.quit()
+        if browser_cm:
+            browser_cm.quit()
